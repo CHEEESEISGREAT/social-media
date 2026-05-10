@@ -3,53 +3,66 @@ const fs = require('fs');
 const path = require('path');
 
 const server = http.createServer((req, res) => {
-    // Enable CORS so your friend's HTML file can talk to your server
     res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
 
-    if (req.method === 'OPTIONS') { res.end(); return; }
+    if (req.method === 'OPTIONS') return res.end();
 
-    // ROUTE: Get Forum Posts
+    const dbPath = './data.json';
+    const readDB = () => JSON.parse(fs.readFileSync(dbPath));
+    const writeDB = (data) => fs.writeFileSync(dbPath, JSON.stringify(data, null, 2));
+
+    // ROUTE: Get All Data
     if (req.url === '/posts' && req.method === 'GET') {
-        const data = fs.readFileSync('./data.json');
         res.writeHead(200, {'Content-Type': 'application/json'});
-        res.end(data);
+        return res.end(fs.readFileSync(dbPath));
     }
 
-    // ROUTE: Save New Forum Post
-    else if (req.url === '/posts' && req.method === 'POST') {
+    // ROUTE: Sign Up & Forum Posts
+    if (req.url === '/posts' && req.method === 'POST') {
         let body = '';
-        req.on('data', chunk => { body += chunk.toString(); });
+        req.on('data', c => body += c);
         req.on('end', () => {
-            const db = JSON.parse(fs.readFileSync('./data.json'));
-            db.posts.push(JSON.parse(body));
-            fs.writeFileSync('./data.json', JSON.stringify(db));
-            res.end('Posted!');
+            const db = readDB();
+            const item = JSON.parse(body);
+            
+            if (item.action === 'signup') {
+                db.users.push({ user: item.user, pass: item.pass });
+            } else {
+                db.posts.push(item); // Text posts/forum
+            }
+            
+            writeDB(db);
+            res.end(JSON.stringify({status: 'ok'}));
         });
     }
 
-    // ROUTE: Upload a Reel
-    else if (req.url === '/upload' && req.method === 'POST') {
-        const fileName = `reel-${Date.now()}.mp4`;
-        const fileStream = fs.createWriteStream(path.join(__dirname, 'reels', fileName));
-        req.pipe(fileStream);
+    // ROUTE: Video/Image Uploads
+    if (req.url === '/upload' && req.method === 'POST') {
+        const name = `file-${Date.now()}.mp4`;
+        const filePath = path.join(__dirname, 'reels', name);
+        const stream = fs.createWriteStream(filePath);
+        req.pipe(stream);
         req.on('end', () => {
-            const db = JSON.parse(fs.readFileSync('./data.json'));
-            db.reels.push({ url: `http://localhost:3000/reels/${fileName}` });
-            fs.writeFileSync('./data.json', JSON.stringify(db));
-            res.end('Video Uploaded!');
+            const db = readDB();
+            db.reels.push({ 
+                url: `https://${req.headers.host}/reels/${name}`,
+                user: req.headers['x-user'],
+                caption: req.headers['x-caption'],
+                timestamp: Date.now()
+            });
+            writeDB(db);
+            res.end('ok');
         });
     }
 
-    // ROUTE: Serve Videos
-    else if (req.url.startsWith('/reels/')) {
-        const filePath = path.join(__dirname, req.url);
-        if (fs.existsSync(filePath)) {
-            const stat = fs.statSync(filePath);
-            res.writeHead(200, { 'Content-Length': stat.size, 'Content-Type': 'video/mp4' });
-            fs.createReadStream(filePath).pipe(res);
-        }
+    // SERVE MEDIA
+    if (req.url.startsWith('/reels/')) {
+        const p = path.join(__dirname, req.url);
+        if (fs.existsSync(p)) fs.createReadStream(p).pipe(res);
     }
 });
 
-server.listen(3000, () => console.log('Server running at http://localhost:3000'));
+if (!fs.existsSync('./reels')) fs.mkdirSync('./reels');
+server.listen(3000);
