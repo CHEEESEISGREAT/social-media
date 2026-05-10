@@ -1,5 +1,5 @@
 {
-  "users": [],
-  "posts": [{"user": "Admin", "text": "Welcome to the forum!"}],
+  "users": [{"user": "admin", "pass": "password"}],
+  "posts": [],
   "reels": []
 }
