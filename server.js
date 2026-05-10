@@ -7,74 +7,69 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-// 1. Create the Folders
+// 1. Folders
 const folders = [
     path.join(__dirname, 'posts'),
     path.join(__dirname, 'profiles'),
     path.join(__dirname, 'profiles/profilepictures')
 ];
+folders.forEach(f => { if (!fs.existsSync(f)) fs.mkdirSync(f, { recursive: true }); });
 
-folders.forEach(f => {
-    if (!fs.existsSync(f)) fs.mkdirSync(f, { recursive: true });
-});
-
-// 2. Serve images so frontend can load them
 app.use('/profilepictures', express.static(path.join(__dirname, 'profiles/profilepictures')));
 
-// 3. GET POSTS (Fixes the "undefined" error)
-app.get('/posts', (req, res) => {
-    try {
-        const files = fs.readdirSync(path.join(__dirname, 'posts'));
-        const posts = files.map(file => {
-            const data = fs.readFileSync(path.join(__dirname, 'posts', file));
-            return JSON.parse(data);
-        });
-        // We return the array directly inside a "posts" key to match your frontend loop
-        res.json({ posts: posts }); 
-    } catch (err) {
-        res.json({ posts: [] });
+// 2. AUTH SYSTEM (Fixes logging into accounts that don't exist)
+app.post('/auth', (req, res) => {
+    const { user, pass, action } = req.body;
+    const userFile = path.join(__dirname, 'profiles', `${user.toLowerCase()}.json`);
+
+    if (action === 'signup') {
+        if (fs.existsSync(userFile)) return res.status(400).json({ error: "User already exists" });
+        const userData = { user, pass, bio: "Member of Socials.", pfp: "" };
+        fs.writeFileSync(userFile, JSON.stringify(userData));
+        return res.json({ success: true, user: userData });
+    } 
+    
+    if (action === 'login') {
+        if (!fs.existsSync(userFile)) return res.status(404).json({ error: "User not found" });
+        const userData = JSON.parse(fs.readFileSync(userFile));
+        if (userData.pass !== pass) return res.status(401).json({ error: "Wrong password" });
+        return res.json({ success: true, user: userData });
     }
 });
 
-// 4. SAVE/DELETE POSTS
+// 3. GET POSTS
+app.get('/posts', (req, res) => {
+    try {
+        const files = fs.readdirSync(path.join(__dirname, 'posts'));
+        const posts = files.map(file => JSON.parse(fs.readFileSync(path.join(__dirname, 'posts', file))));
+        res.json({ posts });
+    } catch (e) { res.json({ posts: [] }); }
+});
+
+// 4. POSTING & DELETING
 app.post('/posts', (req, res) => {
     const data = req.body;
 
-    // Handle Delete
     if (data.action === 'delete') {
         const filePath = path.join(__dirname, 'posts', `${data.postId}.json`);
         if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
         return res.json({ success: true });
     }
 
-    // Handle PFP Storage
-    let finalPfp = data.pfp || "";
-    if (data.pfp && data.pfp.includes('data:image')) {
-        const base64Data = data.pfp.split(',')[1];
-        const filename = `${data.user.replace(/\s+/g, '_')}_pfp.png`;
-        fs.writeFileSync(path.join(__dirname, 'profiles/profilepictures', filename), base64Data, 'base64');
-        // This URL must match your Render URL (or use relative path)
-        finalPfp = `https://${req.get('host')}/profilepictures/${filename}`;
-    }
-
+    // Fixes the "Unknown" issue by ensuring data.user is used
     const timestamp = Date.now().toString();
     const postObject = {
-        user: data.user || "Unknown",
+        user: data.user || "Guest",
         text: data.text || "",
         img: data.img || null,
-        pfp: finalPfp,
-        bio: data.bio || "Member of Socials.",
+        pfp: data.pfp || "", 
+        bio: data.bio || "",
         timestamp: timestamp,
         type: 'feed'
     };
 
-    fs.writeFileSync(
-        path.join(__dirname, 'posts', `${timestamp}.json`),
-        JSON.stringify(postObject)
-    );
-
+    fs.writeFileSync(path.join(__dirname, 'posts', `${timestamp}.json`), JSON.stringify(postObject));
     res.json({ success: true });
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+app.listen(process.env.PORT || 3000);
